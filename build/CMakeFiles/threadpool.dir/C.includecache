@@ -1,0 +1,22 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/yangmou/ThreadPoll/threadpool/thpool.c
+thpool.h
+/home/yangmou/ThreadPoll/threadpool/thpool.h
+unistd.h
+-
+stdlib.h
+-
+
+/home/yangmou/ThreadPoll/threadpool/thpool.h
+stdio.h
+-
+pthread.h
+-
+

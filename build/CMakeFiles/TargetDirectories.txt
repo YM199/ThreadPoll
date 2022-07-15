@@ -1,0 +1,3 @@
+/home/yangmou/ThreadPoll/build/CMakeFiles/rebuild_cache.dir
+/home/yangmou/ThreadPoll/build/CMakeFiles/edit_cache.dir
+/home/yangmou/ThreadPoll/build/CMakeFiles/threadpool.dir

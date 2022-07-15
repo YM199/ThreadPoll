@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "thpool.h": "c",
+        "stdlib.h": "c"
+    }
+}
