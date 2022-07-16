@@ -6,6 +6,15 @@
 
 #define err() fprintf(stderr, "%s %d", __FILE__, __LINE__)
 
+/*二值信号量，确保工作队列有工作*/
+struct bsem
+{
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int v;
+};
+
+/*工作结构体*/
 struct job
 {
     struct job *prev;            /*队列上一个节点*/
@@ -13,12 +22,14 @@ struct job
     void *arg;                   /*函数的参数*/
 };
 
+/*工作队列结构体*/
 struct jobqueue
 {
     pthread_mutex_t rwmutex;
-    struct job *front; /*指向队列头指针*/
-    struct job *rear;  /*指向队列尾指针*/
-    int len;           /*队列的长度*/
+    struct job *front;     /*指向队列头指针*/
+    struct job *rear;      /*指向队列尾指针*/
+    struct bsem *has_jobs; /*二值信号量 1代表有工作 0代表无工作*/
+    int len;               /*队列的长度*/
 };
 
 /*线程结构体*/

@@ -10,6 +10,12 @@ static int thread_init(struct thpool_ *thpool_p, struct thread **thread_p, int i
 static int jobqueue_init(struct jobqueue *jobqueue_p);
 static struct job *jobqueue_pull(struct jobqueue *jobqueue_p);
 static void jobqueue_push(struct jobqueue *jobqueue_p, struct job *newjob);
+
+static void bsem_init(struct bsem *bsem_p, int value);
+static void bsem_post(struct bsem *bsem_p);
+static void bsem_post_all(struct bsem *bsem_p);
+static void bsem_wait(struct bsem *bsem_p);
+
 /**
  * @brief 线程池初始化
  *
@@ -54,7 +60,8 @@ struct thpool_ *thpool_init(int num_threads)
     }
 
     /*等待线程初始化完毕*/
-    while (thpool_p->num_threads_alive != num_threads);
+    while (thpool_p->num_threads_alive != num_threads)
+        ;
 
     return thpool_p;
 }
@@ -101,6 +108,8 @@ static void *thread_do(struct thread *thread_p)
 
     while (threads_keepalive)
     {
+        bsem_wait(thpool_p->jobqueue.has_jobs); /*确保工作队队列里面有工作*/
+
         pthread_mutex_lock(&thpool_p->thcount_lock);
         thpool_p->num_threads_working++;
         pthread_mutex_unlock(&thpool_p->thcount_lock);
@@ -160,6 +169,8 @@ static int thread_init(struct thpool_ *thpool_p, struct thread **thread_p, int i
     return 0;
 }
 
+/************************工作队列*************************/
+
 /**
  * @brief 初始化工作队列
  *
@@ -172,7 +183,14 @@ static int jobqueue_init(struct jobqueue *jobqueue_p)
     jobqueue_p->front = NULL;
     jobqueue_p->rear = NULL;
 
+    jobqueue_p->has_jobs = (struct bsem *)malloc(sizeof(struct bsem));
+    if (jobqueue_p->has_jobs == NULL)
+    {
+        return -1;
+    }
+
     pthread_mutex_init(&(jobqueue_p->rwmutex), NULL);
+    bsem_init(jobqueue_p->has_jobs, 0);
 
     return 0;
 }
@@ -203,6 +221,8 @@ static void jobqueue_push(struct jobqueue *jobqueue_p, struct job *newjob)
 
     jobqueue_p->len++;
 
+    bsem_post(jobqueue_p->has_jobs); /*通知有工作了*/
+
     pthread_mutex_unlock(&jobqueue_p->rwmutex);
 }
 
@@ -230,9 +250,57 @@ static struct job *jobqueue_pull(struct jobqueue *jobqueue_p)
     default:
         jobqueue_p->front = job_p->prev;
         jobqueue_p->len--;
+        bsem_post(jobqueue_p->has_jobs); /*通知还有剩余的工作*/
         break;
     }
     pthread_mutex_unlock(&jobqueue_p->rwmutex);
 
     return job_p;
+}
+
+/************************二值信号量*************************/
+
+/**
+ * @brief 初始化信号量为1或0
+ *
+ * @param bsem_p 二值信号量
+ * @param value 信号量的值
+ */
+static void bsem_init(struct bsem *bsem_p, int value)
+{
+    if (value < 0 || value > 1)
+    {
+        err();
+        exit(1);
+    }
+    pthread_mutex_init(&(bsem_p->mutex), NULL);
+    pthread_cond_init(&(bsem_p->cond), NULL);
+    bsem_p->v = value;
+}
+
+static void bsem_post(struct bsem *bsem_p)
+{
+    pthread_mutex_lock(&bsem_p->mutex);
+    bsem_p->v = 1;
+    pthread_cond_signal(&bsem_p->cond);
+    pthread_mutex_unlock(&bsem_p->mutex);
+}
+
+static void bsem_post_all(struct bsem *bsem_p)
+{
+    pthread_mutex_lock(&bsem_p->mutex);
+    bsem_p->v = 1;
+    pthread_cond_broadcast(&bsem_p->cond);
+    pthread_mutex_unlock(&bsem_p->mutex);
+}
+
+static void bsem_wait(struct bsem *bsem_p)
+{
+    pthread_mutex_lock(&bsem_p->mutex);
+    while (bsem_p->v != 1)
+    {
+        pthread_cond_wait(&bsem_p->cond, &bsem_p->mutex);
+    }
+    bsem_p->v = 0;
+    pthread_mutex_unlock(&bsem_p->mutex);
 }
