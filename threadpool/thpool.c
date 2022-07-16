@@ -97,7 +97,7 @@ static void *thread_do(struct thread *thread_p)
     struct thpool_ *thpool_p = thread_p->thpool_p;
 
     pthread_mutex_lock(&thpool_p->thcount_lock);
-    thpool_p->num_threads_alive--;
+    thpool_p->num_threads_alive++;
     pthread_mutex_unlock(&thpool_p->thcount_lock);
 
     while (threads_keepalive)

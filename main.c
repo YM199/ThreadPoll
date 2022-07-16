@@ -15,5 +15,8 @@ int main(void)
     {
         thpool_add_work(thpool, task, (void *)(uintptr_t)i);
     }
+
+    while(1);
+
     return 0;
 }
