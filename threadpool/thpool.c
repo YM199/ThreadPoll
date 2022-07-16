@@ -54,8 +54,7 @@ struct thpool_ *thpool_init(int num_threads)
     }
 
     /*等待线程初始化完毕*/
-    while (thpool_p->num_threads_alive != num_threads)
-        ;
+    while (thpool_p->num_threads_alive != num_threads);
 
     return thpool_p;
 }
@@ -135,7 +134,7 @@ static void *thread_do(struct thread *thread_p)
 }
 
 /**
- * @brief 初始化线程池里面的线程
+ * @brief 初始化线程池结构体里面的线程结构体并创建线程
  *
  * @param thpool_p 线程池结构体指针
  * @param thread_p 线程结构体指针
