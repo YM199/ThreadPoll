@@ -17,6 +17,7 @@ int main(void)
     }
 
     thpool_wait(thpool);
+    thpool_destroy(thpool);
 
     return 0;
 }

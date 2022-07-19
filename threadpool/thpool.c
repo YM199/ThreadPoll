@@ -2,19 +2,23 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-static volatile int threads_keepalive = 1; /*让线程一直活着*/
+static volatile int threads_keepalive = 1; /*1 让线程一直活着, 0 让线程死亡*/
 
 static void *thread_do(struct thread *thread_p);
 static int thread_init(struct thpool_ *thpool_p, struct thread **thread_p, int id);
+static void thread_destroy(struct thread *thread_p);
 
 static int jobqueue_init(struct jobqueue *jobqueue_p);
 static struct job *jobqueue_pull(struct jobqueue *jobqueue_p);
 static void jobqueue_push(struct jobqueue *jobqueue_p, struct job *newjob);
+static void jobqueue_clear(struct jobqueue *jobqueue_p);
+static void jobqueue_destroy(struct jobqueue *jobqueue_p);
 
 static void bsem_init(struct bsem *bsem_p, int value);
 static void bsem_post(struct bsem *bsem_p);
 static void bsem_post_all(struct bsem *bsem_p);
 static void bsem_wait(struct bsem *bsem_p);
+static void bsem_reset(struct bsem *bsem_p);
 
 /**
  * @brief 线程池初始化
@@ -41,6 +45,7 @@ struct thpool_ *thpool_init(int num_threads)
     if (jobqueue_init(&thpool_p->jobqueue) == -1)
     {
         err();
+        free(thpool_p);
         return NULL;
     }
 
@@ -48,6 +53,8 @@ struct thpool_ *thpool_init(int num_threads)
     if (thpool_p->threads == NULL)
     {
         err();
+        jobqueue_destroy(&thpool_p->jobqueue);
+        free(thpool_p);
         return NULL;
     }
 
@@ -94,17 +101,69 @@ int thpool_add_work(struct thpool_ *thpool_p, void (*function_p)(void *), void *
 
 /**
  * @brief 等待所有工作结束
- * 
+ *
  * @param thpool_p 线程池结构体指针
  */
-void thpool_wait(struct thpool_ * thpool_p)
+void thpool_wait(struct thpool_ *thpool_p)
 {
     pthread_mutex_lock(&thpool_p->thcount_lock);
-    while(thpool_p->jobqueue.len || thpool_p->num_threads_working)
+    while (thpool_p->jobqueue.len || thpool_p->num_threads_working)
     {
         pthread_cond_wait(&thpool_p->threads_all_idle, &thpool_p->thcount_lock);
     }
     pthread_mutex_unlock(&thpool_p->thcount_lock);
+}
+
+/**
+ * @brief 摧毁线程池
+ *
+ * @param thpool_p 线程池结构体指针
+ */
+void thpool_destroy(struct thpool_ *thpool_p)
+{
+    if (thpool_p == NULL)
+        return;
+    volatile int threads_total = thpool_p->num_threads_alive;
+
+    threads_keepalive = 0;
+
+    /*给一秒钟时间杀死空闲线程*/
+    double TIMEOUT = 1.0;
+    time_t start, end;
+    double tpassed = 0.0;
+    time(&start); /*获取当前时间*/
+    while (tpassed < TIMEOUT && thpool_p->num_threads_alive)
+    {
+        bsem_post_all(thpool_p->jobqueue.has_jobs); /*唤醒所有线程让它们结束*/
+        time(&end);
+        tpassed = difftime(end, start);
+    }
+
+    /*不断唤醒剩余线程直到他们结束*/
+    while (thpool_p->num_threads_alive)
+    {
+        bsem_post_all(thpool_p->jobqueue.has_jobs);
+        sleep(1);
+    }
+
+    jobqueue_clear(&thpool_p->jobqueue);
+
+    for (int i = 0; i < threads_total; i++)
+    {
+        thread_destroy(thpool_p->threads[i]);
+    }
+    free(thpool_p->threads);
+    free(thpool_p);
+}
+
+/**
+ * @brief 释放线程结构体
+ *
+ * @param thread_p 线程结构体
+ */
+static void thread_destroy(struct thread *thread_p)
+{
+    free(thread_p);
 }
 
 /**
@@ -273,6 +332,30 @@ static struct job *jobqueue_pull(struct jobqueue *jobqueue_p)
     return job_p;
 }
 
+/**
+ * @brief 清理工作队列
+ *
+ * @param jobqueue_p
+ */
+static void jobqueue_clear(struct jobqueue *jobqueue_p)
+{
+    while (jobqueue_p->len)
+    {
+        free(jobqueue_pull(jobqueue_p)); /*释放工作结构体*/
+    }
+
+    jobqueue_p->front = NULL;
+    jobqueue_p->rear = NULL;
+    bsem_reset(jobqueue_p->has_jobs); /*代表没工作了*/
+    jobqueue_p->len = 0;
+}
+
+static void jobqueue_destroy(struct jobqueue *jobqueue_p)
+{
+    jobqueue_clear(jobqueue_p);
+    free(jobqueue_p->has_jobs);
+}
+
 /************************二值信号量*************************/
 
 /**
@@ -293,6 +376,11 @@ static void bsem_init(struct bsem *bsem_p, int value)
     bsem_p->v = value;
 }
 
+/**
+ * @brief 唤醒一个线程
+ * 
+ * @param bsem_p 信号量
+ */
 static void bsem_post(struct bsem *bsem_p)
 {
     pthread_mutex_lock(&bsem_p->mutex);
@@ -301,6 +389,11 @@ static void bsem_post(struct bsem *bsem_p)
     pthread_mutex_unlock(&bsem_p->mutex);
 }
 
+/**
+ * @brief 唤醒所有线程
+ * 
+ * @param bsem_p 信号量
+ */
 static void bsem_post_all(struct bsem *bsem_p)
 {
     pthread_mutex_lock(&bsem_p->mutex);
@@ -309,6 +402,11 @@ static void bsem_post_all(struct bsem *bsem_p)
     pthread_mutex_unlock(&bsem_p->mutex);
 }
 
+/**
+ * @brief 等待信号量值为1
+ * 
+ * @param bsem_p 信号量
+ */
 static void bsem_wait(struct bsem *bsem_p)
 {
     pthread_mutex_lock(&bsem_p->mutex);
@@ -316,6 +414,16 @@ static void bsem_wait(struct bsem *bsem_p)
     {
         pthread_cond_wait(&bsem_p->cond, &bsem_p->mutex);
     }
-    bsem_p->v = 0;
+    bsem_p->v = 0; /*拿走了信号量，值设置为0*/
     pthread_mutex_unlock(&bsem_p->mutex);
+}
+
+/**
+ * @brief 设置信号量为0
+ *
+ * @param bsem_p 二值信号量
+ */
+static void bsem_reset(struct bsem *bsem_p)
+{
+    bsem_init(bsem_p, 0);
 }

@@ -54,5 +54,6 @@ struct thpool_
 struct thpool_ *thpool_init(int num_threads);
 int thpool_add_work(struct thpool_ *thpool_p, void (*function_p)(void *), void *arg_p);
 void thpool_wait(struct thpool_ * thpool_p);
+void thpool_destroy(struct thpool_ *thpool_p);
 
 #endif
